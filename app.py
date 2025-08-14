@@ -393,8 +393,7 @@ async def ping_open_ai_5(question_text, relevant_context="", max_tries=3):
                 "messages": [
                     {"role": "system", "content": relevant_context},
                     {"role": "user", "content": question_text}
-                ],
-                "temperature": 0.7
+                ]
             }
             async with httpx.AsyncClient(timeout=120) as client:
                 response = await client.post(openai_gpt5_url, headers=headers, json=payload)
