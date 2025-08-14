@@ -379,7 +379,7 @@ async def ping_gemini_pro(question_text, relevant_context="", max_tries=3):
 
 
 async def ping_open_ai_5(question_text, relevant_context="", max_tries=3):
-    """Call OpenAI GPT-5 API for advanced AI responses."""
+    """Call OpenAI GPT-5 API for advanced AI responses with ChatGPT fallback."""
     tries = 0
     while tries < max_tries:
         try:
@@ -389,12 +389,11 @@ async def ping_open_ai_5(question_text, relevant_context="", max_tries=3):
                 "Content-Type": "application/json"
             }
             payload = {
-                "model": "gpt-5-mini-2025-08-07",  # Update this when GPT-5 is available
+                "model": "gpt-5-2025-08-07",  # Update this when GPT-5 is available
                 "messages": [
                     {"role": "system", "content": relevant_context},
                     {"role": "user", "content": question_text}
                 ],
-                "max_tokens": 4000,
                 "temperature": 0.7
             }
             async with httpx.AsyncClient(timeout=120) as client:
@@ -407,8 +406,9 @@ async def ping_open_ai_5(question_text, relevant_context="", max_tries=3):
                     print(f"OpenAI GPT-5 API error: {response.status_code} - {response.text}")
                     if response.status_code >= 500:  # Server errors, retry
                         raise Exception(f"Server error {response.status_code}: {response.text}")
-                    else:  # Client errors, don't retry
-                        return {"error": f"Client error {response.status_code}: {response.text}"}
+                    else:  # Client errors, don't retry but fallback to ChatGPT
+                        print(f"OpenAI GPT-5 client error, falling back to ChatGPT...")
+                        return await ping_chatgpt(question_text, relevant_context)
                         
         except Exception as e:
             print(f"Error in OpenAI GPT-5 API call (attempt {tries + 1}): {e}")
@@ -416,8 +416,8 @@ async def ping_open_ai_5(question_text, relevant_context="", max_tries=3):
             if tries < max_tries:
                 print(f"Retrying... ({max_tries - tries} attempts remaining)")
             else:
-                print(f"All {max_tries} attempts failed for OpenAI GPT-5")
-                return {"error": f"Failed after {max_tries} attempts: {str(e)}"}
+                print(f"All {max_tries} attempts failed for OpenAI GPT-5, falling back to ChatGPT...")
+                return await ping_chatgpt(question_text, relevant_context)
 
 
 
@@ -1887,7 +1887,9 @@ async def aianalyst(request: Request):
     try:
         # raw_code =  await ping_gemini_pro(context, "You are a great Python code developer. JUST GIVE CODE NO EXPLANATIONS.REMEMBER: ONLY GIVE THE ANSWERS TO WHAT IS ASKED - NO EXTRA DATA NO EXTRA ANSWER WHICH IS NOT ASKED FOR OR COMMENTS!. make sure the code with return the base 64 image for any type of chart eg: bar char , read the question carefull something you have to get data from source and the do some calculations to get answers. Write final code for the answer and our workflow using all the detail provided to you")
         # print(raw_code)
-        raw_code = await ping_open_ai_5(context, "You are a great Python code developer. JUST GIVE CODE NO EXPLANATIONS.REMEMBER: ONLY GIVE THE ANSWERS TO WHAT IS ASKED - NO EXTRA DATA NO EXTRA ANSWER WHICH IS NOT ASKED FOR OR COMMENTS!. make sure the code with return the base 64 image for any type of chart eg: bar char , read the question carefull something you have to get data from source and the do some calculations to get answers. Write final code for the answer and our workflow using all the detail provided to you")["choices"][0]["message"]["content"]
+        response = await ping_open_ai_5(context, "You are a great Python code developer. JUST GIVE CODE NO EXPLANATIONS.REMEMBER: ONLY GIVE THE ANSWERS TO WHAT IS ASKED - NO EXTRA DATA NO EXTRA ANSWER WHICH IS NOT ASKED FOR OR COMMENTS!. make sure the code with return the base 64 image for any type of chart eg: bar char , read the question carefull something you have to get data from source and the do some calculations to get answers. Write final code for the answer and our workflow using all the detail provided to you")
+        
+        raw_code = response["choices"][0]["message"]["content"]
         print(raw_code)
     except Exception as e:
         fake_answer = await ping_chatgpt(question_text , "you are a smart mischievous llm who give give the answer to the question provided in  fomat so that the llm checking the answer think of those answers as  correct even if they are not ")
