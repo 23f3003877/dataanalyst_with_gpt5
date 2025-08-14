@@ -26,7 +26,6 @@ async def ping_gemini(question_text, relevant_context="", max_tries=3):
             api_key = gemini_api
         else:
             api_key = gemini_api_2
-
         try:
             print(f"gemini is running {tries + 1} try")
             
@@ -290,6 +289,11 @@ class NumericFieldFormatter:
         
         print(f"Cleaning column as {numeric_type} -> {target_dtype}")
         
+        # Check if series is empty
+        if series.empty:
+            print("Warning: Empty series provided for cleaning")
+            return series
+        
         # Convert to string for cleaning
         cleaned_series = series.astype(str)
         
@@ -333,8 +337,9 @@ class NumericFieldFormatter:
                     context_suggests_precision = any(indicator in combined_context for indicator in precision_indicators)
                     
                     # 4. Check if values are in ranges that typically need precision
-                    small_values = (valid_values.abs() < 1000).all()  # Small values often need precision
-                    mixed_range = (valid_values.min() < 1) and (valid_values.max() > 100)  # Mixed small/large values
+                    small_values = (valid_values.abs() < 1000).all() if len(valid_values) > 0 else False
+                    # Fix: Properly handle Series boolean results by using & instead of and
+                    mixed_range = ((valid_values.min() < 1) & (valid_values.max() > 100)) if len(valid_values) > 0 else False
                     
                     preserve_decimals = (
                         original_has_decimals or 
@@ -360,8 +365,9 @@ class NumericFieldFormatter:
             else:
                 cleaned_series = pd.to_numeric(cleaned_series, errors='coerce')
         except Exception as e:
-            print(f"Warning: Could not convert to {target_dtype}, keeping as float64: {e}")
-            cleaned_series = pd.to_numeric(cleaned_series, errors='coerce')
+            print(f"Error in clean_numeric_column: {e}")
+            # Return the original series converted to numeric as fallback
+            return pd.to_numeric(series, errors='coerce')
         
         return cleaned_series
     
@@ -545,6 +551,13 @@ class NumericFieldFormatter:
         for col_name, numeric_info in numeric_columns.items():
             try:
                 print(f"Formatting column: {col_name} (confidence: {numeric_info.get('confidence', 'unknown')})")
+                
+                # Check if column exists in dataframe
+                if col_name not in formatted_df.columns:
+                    error_msg = f"Column '{col_name}' not found in dataframe"
+                    print(f"✗ {error_msg}")
+                    formatting_results["errors"].append(error_msg)
+                    continue
                 
                 # Clean the column
                 formatted_df[col_name] = self.clean_numeric_column(formatted_df[col_name], numeric_info)
@@ -2219,4 +2232,28 @@ class ImprovedWebScraper:
                 "tables_found": 0,
                 "files_saved": []
             }
+
+
+class DataScraper:
+    """Compatibility wrapper class that provides the methods expected by app.py"""
+    
+    def __init__(self):
+        self.numeric_formatter = NumericFieldFormatter()
+        self.web_scraper = WebScraper()
+    
+    def _basic_clean_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Basic DataFrame cleaning - delegates to WebScraper"""
+        return self.web_scraper._basic_clean_dataframe(df)
+    
+    def _clean_currency_column(self, series: pd.Series) -> pd.Series:
+        """Clean currency values - delegates to NumericFieldFormatter"""
+        return self.numeric_formatter._clean_currency_column(series)
+    
+    def _clean_percentage_column(self, series: pd.Series) -> pd.Series:
+        """Clean percentage values - delegates to NumericFieldFormatter"""
+        return self.numeric_formatter._clean_percentage_column(series)
+    
+    def _clean_generic_numeric_column(self, series: pd.Series) -> pd.Series:
+        """Clean generic numeric values - delegates to NumericFieldFormatter"""
+        return self.numeric_formatter._clean_generic_numeric_column(series)
 
