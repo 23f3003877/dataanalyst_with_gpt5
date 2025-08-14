@@ -1935,7 +1935,7 @@ async def aianalyst(request: Request):
                     new_files = post_exec_snapshot - pre_exec_snapshot
                     files_to_delete = {os.path.normpath(p) for p in new_files} | created_files
                     # _cleanup_created_files(files_to_delete)
-                    
+                    print(output_data)
                     return JSONResponse(
                         content=output_data,
                         media_type="application/json"
@@ -2061,7 +2061,7 @@ async def aianalyst(request: Request):
                         # Prefer fix attempt snapshot if present
                         new_files = post_exec_snapshot - (fix_pre_exec_snapshot if 'fix_pre_exec_snapshot' in locals() else pre_exec_snapshot)
                         files_to_delete = {os.path.normpath(p) for p in new_files} | created_files
-                        
+                        print(output_data)
                         _cleanup_created_files(files_to_delete)
                         return JSONResponse(
                             content=output_data,
