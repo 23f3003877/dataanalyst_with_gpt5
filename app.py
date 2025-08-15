@@ -431,29 +431,67 @@ def extract_json_from_output(output: str) -> str:
     """Extract JSON from output that might contain extra text"""
     output = output.strip()
     
+    # Remove BOM if present
+    output = output.lstrip('\ufeff')
+    
+    # Try to find valid JSON by testing each potential match
+    def find_valid_json_objects(pattern):
+        matches = re.findall(pattern, output, re.DOTALL)
+        valid_matches = []
+        for match in matches:
+            try:
+                # Test if it's valid JSON
+                json.loads(match)
+                valid_matches.append(match)
+            except json.JSONDecodeError:
+                continue
+        return valid_matches
+    
     # First try to find complete JSON objects (prioritize these)
-    object_pattern = r'\{.*\}'
-    object_matches = re.findall(object_pattern, output, re.DOTALL)
+    object_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+    valid_objects = find_valid_json_objects(object_pattern)
     
-    # If we find JSON objects, return the longest one (most complete)
-    if object_matches:
-        longest_match = max(object_matches, key=len)
-        return longest_match
+    if valid_objects:
+        # Return the longest valid match
+        return max(valid_objects, key=len)
     
-    # Only if no objects found, look for arrays
-    array_pattern = r'\[.*\]'
-    array_matches = re.findall(array_pattern, output, re.DOTALL)
+    # Only if no valid objects found, look for arrays
+    array_pattern = r'\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]'
+    valid_arrays = find_valid_json_objects(array_pattern)
     
-    if array_matches:
-        longest_match = max(array_matches, key=len)
-        return longest_match
+    if valid_arrays:
+        return max(valid_arrays, key=len)
+    
+    # Fallback: try to extract any JSON-like structure line by line
+    lines = output.split('\n')
+    for line in lines:
+        line = line.strip()
+        if (line.startswith('{') and line.endswith('}')) or (line.startswith('[') and line.endswith(']')):
+            try:
+                json.loads(line)
+                return line
+            except json.JSONDecodeError:
+                continue
     
     return output
 
 def is_valid_json_output(output: str) -> bool:
-    """Check if the output is valid JSON without trying to parse it"""
+    """Check if the output is valid JSON by actually trying to parse it"""
     output = output.strip()
-    return (output.startswith('{') and output.endswith('}')) or (output.startswith('[') and output.endswith(']'))
+    
+    # Remove BOM if present
+    output = output.lstrip('\ufeff')
+    
+    # Must start and end with JSON delimiters
+    if not ((output.startswith('{') and output.endswith('}')) or (output.startswith('[') and output.endswith(']'))):
+        return False
+    
+    # Actually try to parse it to be sure
+    try:
+        json.loads(output)
+        return True
+    except json.JSONDecodeError:
+        return False
 
 async def extract_all_urls_and_databases(question_text: str, uploaded_files: list = None) -> dict:
     """Extract all URLs for scraping and database files from the question"""
@@ -2896,8 +2934,11 @@ async def aianalyst(request: Request):
                     )
                 except json.JSONDecodeError as e:
                     print(f"JSON decode error: {str(e)[:100]}")
+                    print(f"Raw stdout (first 200 chars): {repr(stdout[:200])}")
+                    print(f"Extracted JSON (first 200 chars): {repr(json_output[:200])}")
             else:
                 print(f"Output doesn't look like JSON: {json_output[:100]}")
+                print(f"Raw stdout (first 200 chars): {repr(stdout[:200])}")
         else:
             print(f"Execution error: {result.stderr}")
 
@@ -3023,8 +3064,11 @@ async def aianalyst(request: Request):
                         )
                     except json.JSONDecodeError as e:
                         print(f"JSON decode error on fix attempt {fix_attempt}: {str(e)[:100]}")
+                        print(f"Raw stdout (first 200 chars): {repr(stdout[:200])}")
+                        print(f"Extracted JSON (first 200 chars): {repr(json_output[:200])}")
                 else:
                     print(f"Output still doesn't look like JSON on fix attempt {fix_attempt}: {json_output[:100]}")
+                    print(f"Raw stdout (first 200 chars): {repr(stdout[:200])}")
             else:
                 print(f"Execution still failing on fix attempt {fix_attempt}: {result.stderr}")
 
