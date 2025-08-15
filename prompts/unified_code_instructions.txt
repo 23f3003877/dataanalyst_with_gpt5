@@ -3,7 +3,6 @@ If a data is in a csv file it will be mentioned in the data_summary section. che
 
 SOME CLEVER STRATEGIES: IN URL BASED QUESTION insted of filing feilds with NONE fill then with what you think is correct so that if there isnt no data to answer them they will be answered using your own knowledge.
 BELIVE: ALWAYS BELIVE THAT THE QUESTION CAN BE ANSWERED WITH THE DATA PROVIDED.
-IF ABSOLUTE NECESSITY AND IMPORTANT: If you think in case of a URL scraping question the table extracted is not enough to answer then you can either use your own knowledge or use the privided URL.
 ABSOLUTE NECESSITY: IF BY LOOKING THE data_summary YOU BELIVE SOMETHING CANNOT BE ANSWERED THEN YOU CAN USE ANYWAYS TO ANSWER THE QUESTION.
 
 
