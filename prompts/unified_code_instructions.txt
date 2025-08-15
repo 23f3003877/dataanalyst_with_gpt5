@@ -81,22 +81,39 @@ SQL QUERY EXAMPLES BY QUESTION TYPE:
 3. "Average/Sum by year":
    SELECT year, AVG(value) as average FROM table GROUP BY year ORDER BY year
 
-4. "Items matching criteria":
+4. "Binning with CASE - CRITICAL SYNTAX":
+   SELECT
+       CASE
+           WHEN column < 10 THEN 'Low'
+           WHEN column <= 20 THEN 'Medium'
+           ELSE 'High'
+       END as category,
+       AVG(other_column) as avg_value
+   FROM table
+   GROUP BY
+       CASE
+           WHEN column < 10 THEN 'Low'
+           WHEN column <= 20 THEN 'Medium'
+           ELSE 'High'
+       END
+   ORDER BY 1  -- Use positional ordering with GROUP BY
+
+5. "Items matching criteria":
    SELECT specific_columns FROM table WHERE condition1 AND condition2 LIMIT 100
 
-5. "Percentage/ratio calculations":
+6. "Percentage/ratio calculations":
    SELECT category, 
           COUNT(*) as count,
           COUNT(*) * 100.0 / (SELECT COUNT(*) FROM table) as percentage
    FROM table GROUP BY category
 
-6. "Date range analysis":
+7. "Date range analysis":
    SELECT DATE_PART('year', date_column) as year, COUNT(*) as count
    FROM table 
    WHERE date_column >= '2020-01-01'
    GROUP BY year
 
-7. "Find specific records":
+8. "Find specific records":
    SELECT * FROM table 
    WHERE column LIKE '%search_term%' 
    OR another_column = 'specific_value'
@@ -113,9 +130,15 @@ Or use date_part() only on actual DATE/TIMESTAMP/INTERVAL types.
 Always check the DuckDB function signature before applying a function.
 
 If a function call results in a type mismatch, either cast to the required type or choose an alternative function that directly returns the needed value.
+
+🚨 CRITICAL GROUP BY RULE:
+When using GROUP BY with CASE expressions, use positional ORDER BY (ORDER BY 1, 2, 3) instead of referencing column names.
+❌ WRONG: ORDER BY study_hours_per_week (when using GROUP BY with CASE)
+✅ CORRECT: ORDER BY 1 (or repeat the full CASE expression)
+
 🎯 Use WHERE clauses to filter at source
 🎯 Use GROUP BY for aggregations
-🎯 Use ORDER BY + LIMIT for rankings
+🎯 Use ORDER BY + LIMIT for rankings (use positional ordering with GROUP BY)
 🎯 Use specific column names, not SELECT *
 🎯 Calculate results in SQL, not Python
 🎯 Use SQL functions: COUNT(), AVG(), SUM(), MAX(), MIN()
@@ -140,4 +163,3 @@ REQUIRED PATTERNS:
 REMEMBER: The database is your calculator - use it to compute the answer, don't just fetch raw data!
 REMEMBER: When creating code and using any library always make sure the keyword you use exist or not example: matplotlib.pyplot.savefig() dont have a keyword quality for WEBP format 
 REMEMBER: When writing SQL queries, always make take precautions for special columns like date time to reduce error chance aim for precision and efficiency.
-

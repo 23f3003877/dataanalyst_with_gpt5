@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from io import StringIO
 import requests
 import time
+import shutil
 
 load_dotenv()
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
@@ -583,7 +584,7 @@ class NumericFieldFormatter:
         return formatted_df, formatting_results
 
 class WebScraper:
-    """Handles web scraping functionality"""
+    """Enhanced web scraping functionality with better error handling and multiple extraction methods"""
     
     def __init__(self):
         """Initialize WebScraper with session for cookie management"""
@@ -596,108 +597,518 @@ class WebScraper:
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
         })
+        
+        # Add retry configuration
+        self.max_retries = 3
+        self.retry_delay = 2
+    
+    async def fetch_webpage_with_session(self, url: str) -> str:
+        """Enhanced session-based webpage fetching with better error handling"""
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
+        }
+        
+        for attempt in range(self.max_retries):
+            try:
+                print(f"🌐 Fetching {url} with session method (attempt {attempt + 1}/{self.max_retries})...")
+                
+                async with httpx.AsyncClient(
+                    headers=headers,
+                    timeout=30.0,
+                    follow_redirects=True,
+                    verify=False  # Skip SSL verification for problematic sites
+                ) as client:
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    
+                    content = response.text
+                    
+                    # Enhanced blocking detection
+                    if self._is_content_blocked(content):
+                        raise Exception("Content appears to be blocked or is an error page")
+                    
+                    if len(content) < 500:
+                        raise Exception(f"Content too short ({len(content)} chars), likely an error page")
+                    
+                    print(f"✅ Successfully fetched {len(content)} characters")
+                    return content
+                    
+            except Exception as e:
+                print(f"❌ Session fetch attempt {attempt + 1} failed: {e}")
+                if attempt < self.max_retries - 1:
+                    print(f"⏳ Waiting {self.retry_delay} seconds before retry...")
+                    await asyncio.sleep(self.retry_delay)
+                else:
+                    raise Exception(f"Session fetch failed after {self.max_retries} attempts: {e}")
     
     async def fetch_webpage(self, url: str) -> str:
-        """Fetch webpage content using Playwright with stealth mode"""
+        """Enhanced Playwright-based webpage fetching with better stealth and error handling"""
         stealth = Stealth()
         
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    '--no-sandbox',
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-web-security',
-                    '--disable-features=VizDisplayCompositor'
-                ]
-            )
-            context = await browser.new_context()
-            await stealth.apply_stealth_async(context)
-            
-            page = await context.new_page()
-            
-            # Set additional headers to appear more like a real user
-            await page.set_extra_http_headers({
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-            })
-            
+        for attempt in range(self.max_retries):
+            browser = None
             try:
-                print(f"🌐 Fetching {url} with Playwright stealth mode...")
-                await page.goto(url, wait_until='networkidle', timeout=30000)
-                content = await page.content()
-                await browser.close()
+                print(f"🎭 Fetching {url} with Playwright (attempt {attempt + 1}/{self.max_retries})...")
                 
-                # Check if we got blocked/access denied (improved detection)
-                content_lower = content.lower()
-                
-                # More specific blocking indicators
-                blocked_indicators = [
-                    'access denied',
-                    'you don\'t have permission to access',
-                    '403 forbidden',
-                    'this site is blocked',
-                    'your request has been blocked',
-                    'cloudflare ray id',
-                    'please enable javascript and cookies',
-                    'human verification',
-                    'please complete the security check'
-                ]
-                
-                # Check for blocking only with more context
-                is_blocked = False
-                if len(content) < 1000:  # Short content might be error page
-                    is_blocked = any(indicator in content_lower for indicator in blocked_indicators)
-                else:
-                    # For longer content, only check for very specific blocking messages
-                    specific_blocks = [
-                        'access denied',
-                        'you don\'t have permission to access',
-                        '403 forbidden',
-                        'cloudflare ray id'
-                    ]
-                    is_blocked = any(indicator in content_lower for indicator in specific_blocks)
-                
-                if is_blocked:
-                    print("❌ Playwright got blocked/access denied page")
-                    raise Exception("Access denied - page blocked by server")
-                
-                print("✅ Successfully fetched webpage with Playwright")
-                return content
+                async with async_playwright() as p:
+                    browser = await p.chromium.launch(
+                        headless=True,
+                        args=[
+                            '--no-sandbox',
+                            '--disable-blink-features=AutomationControlled',
+                            '--disable-web-security',
+                            '--disable-features=VizDisplayCompositor',
+                            '--disable-dev-shm-usage',
+                            '--no-first-run',
+                            '--disable-gpu',
+                            '--disable-background-timer-throttling',
+                            '--disable-renderer-backgrounding',
+                            '--disable-backgrounding-occluded-windows'
+                        ]
+                    )
+                    
+                    context = await browser.new_context(
+                        viewport={'width': 1920, 'height': 1080},
+                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    )
+                    
+                    await stealth.apply_stealth_async(context)
+                    
+                    page = await context.new_page()
+                    
+                    # Set additional headers and viewport
+                    await page.set_extra_http_headers({
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                        'Connection': 'keep-alive',
+                        'Upgrade-Insecure-Requests': '1',
+                        'Sec-Fetch-Dest': 'document',
+                        'Sec-Fetch-Mode': 'navigate',
+                        'Sec-Fetch-Site': 'none',
+                        'Sec-Fetch-User': '?1',
+                    })
+                    
+                    # Navigate with enhanced options
+                    response = await page.goto(
+                        url, 
+                        wait_until='domcontentloaded',  # Changed from networkidle for faster loading
+                        timeout=45000
+                    )
+                    
+                    if response and response.status >= 400:
+                        raise Exception(f"HTTP {response.status}: {response.status_text}")
+                    
+                    # Wait for dynamic content to load
+                    try:
+                        await page.wait_for_timeout(3000)  # Wait 3 seconds for JS to execute
+                    except:
+                        pass  # Continue even if timeout fails
+                    
+                    content = await page.content()
+                    await browser.close()
+                    
+                    # Enhanced content validation
+                    if self._is_content_blocked(content):
+                        raise Exception("Content appears to be blocked or is an error page")
+                    
+                    if len(content) < 1000:
+                        raise Exception(f"Content too short ({len(content)} chars), likely an error page")
+                    
+                    print(f"✅ Successfully fetched {len(content)} characters with Playwright")
+                    return content
+                    
             except Exception as e:
-                await browser.close()
-                raise Exception(f"Failed to fetch {url}: {str(e)}")
-    
-    async def extract_table_from_html(self, html_content: str) -> pd.DataFrame:
-        """Extract the best table from HTML content using LLM guidance with fallbacks"""
-        try:
-            # First, let LLM analyze the HTML structure and suggest extraction strategy
-            extraction_strategy = await self._get_llm_extraction_strategy(html_content)
-            
-            if extraction_strategy.get("method") == "pandas_direct":
-                return await self._pandas_extraction_with_llm_guidance(html_content, extraction_strategy)
-            elif extraction_strategy.get("method") == "beautifulsoup_guided":
-                return await self._beautifulsoup_extraction_with_llm_guidance(html_content, extraction_strategy)
-            else:
-                # Fallback to traditional methods
-                return await self._fallback_extraction(html_content)
+                if browser:
+                    try:
+                        await browser.close()
+                    except:
+                        pass
                 
-        except Exception as e:
-            print(f"❌ LLM-guided extraction failed: {e}")
-            print("🔄 Falling back to traditional extraction methods...")
-            try:
-                return await self._fallback_extraction(html_content)
-            except Exception as e2:
-                print(f"❌ Fallback extraction also failed: {e2}")
-                raise Exception(f"All extraction methods failed. Guided: {e}, Fallback: {e2}")
+                print(f"❌ Playwright attempt {attempt + 1} failed: {e}")
+                if attempt < self.max_retries - 1:
+                    print(f"⏳ Waiting {self.retry_delay * (attempt + 1)} seconds before retry...")
+                    await asyncio.sleep(self.retry_delay * (attempt + 1))
+                else:
+                    raise Exception(f"Playwright fetch failed after {self.max_retries} attempts: {e}")
     
+    def _is_content_blocked(self, content: str) -> bool:
+        """Enhanced blocking detection"""
+        if not content or len(content.strip()) < 100:
+            return True
+        
+        content_lower = content.lower()
+        
+        # Comprehensive blocking indicators
+        blocking_indicators = [
+            'access denied',
+            'you don\'t have permission',
+            '403 forbidden',
+            '404 not found',
+            '503 service unavailable',
+            'cloudflare ray id',
+            'please enable javascript',
+            'please enable cookies',
+            'human verification',
+            'security check',
+            'captcha',
+            'bot detected',
+            'automated requests',
+            'unusual traffic',
+            'temporarily blocked',
+            'please try again later',
+            'rate limit exceeded',
+            'too many requests'
+        ]
+        
+        # Check for blocking indicators
+        blocking_count = sum(1 for indicator in blocking_indicators if indicator in content_lower)
+        
+        # If multiple indicators present, likely blocked
+        if blocking_count >= 2:
+            return True
+        
+        # Check for very specific single indicators
+        single_indicators = [
+            'access denied',
+            '403 forbidden',
+            'cloudflare ray id',
+            'human verification required'
+        ]
+        
+        return any(indicator in content_lower for indicator in single_indicators)
+
+    async def extract_table_from_html(self, html_content: str) -> pd.DataFrame:
+        """Enhanced table extraction with multiple fallback methods"""
+        try:
+            # Method 1: LLM-guided extraction
+            try:
+                extraction_strategy = await self._get_llm_extraction_strategy(html_content)
+                
+                if extraction_strategy.get("method") == "pandas_direct":
+                    df = await self._pandas_extraction_with_llm_guidance(html_content, extraction_strategy)
+                    if df is not None and not df.empty:
+                        print("✅ LLM-guided pandas extraction successful")
+                        return df
+                
+                elif extraction_strategy.get("method") == "beautifulsoup_guided":
+                    df = await self._beautifulsoup_extraction_with_llm_guidance(html_content, extraction_strategy)
+                    if df is not None and not df.empty:
+                        print("✅ LLM-guided BeautifulSoup extraction successful")
+                        return df
+            except Exception as e:
+                print(f"⚠️ LLM-guided extraction failed: {e}")
+            
+            # Method 2: Enhanced pandas read_html
+            try:
+                df = await self._enhanced_pandas_extraction(html_content)
+                if df is not None and not df.empty:
+                    print("✅ Enhanced pandas extraction successful")
+                    return df
+            except Exception as e:
+                print(f"⚠️ Enhanced pandas extraction failed: {e}")
+            
+            # Method 3: Smart BeautifulSoup extraction
+            try:
+                df = await self._smart_beautifulsoup_extraction(html_content)
+                if df is not None and not df.empty:
+                    print("✅ Smart BeautifulSoup extraction successful")
+                    return df
+            except Exception as e:
+                print(f"⚠️ Smart BeautifulSoup extraction failed: {e}")
+            
+            # Method 4: Basic fallback
+            try:
+                df = await self._basic_fallback_extraction(html_content)
+                if df is not None and not df.empty:
+                    print("✅ Basic fallback extraction successful")
+                    return df
+            except Exception as e:
+                print(f"⚠️ Basic fallback extraction failed: {e}")
+            
+            raise Exception("All extraction methods failed to find valid tables")
+            
+        except Exception as e:
+            print(f"❌ Complete table extraction failure: {e}")
+            raise
+    
+    async def _enhanced_pandas_extraction(self, html_content: str) -> pd.DataFrame:
+        """Enhanced pandas-based table extraction with multiple attempts"""
+        
+        # Try different pandas configurations
+        configs = [
+            {"match": None, "header": 0, "skiprows": None},
+            {"match": None, "header": 0, "skiprows": 1},
+            {"match": None, "header": None, "skiprows": None},
+            {"match": "data", "header": 0, "skiprows": None},
+            {"match": "table", "header": 0, "skiprows": None},
+        ]
+        
+        best_df = None
+        best_score = 0
+        
+        for config in configs:
+            try:
+                tables = pd.read_html(
+                    StringIO(html_content),
+                    match=config["match"],
+                    header=config["header"],
+                    skiprows=config["skiprows"],
+                    encoding='utf-8'
+                )
+                
+                if tables:
+                    for table in tables:
+                        if len(table) > 1 and len(table.columns) > 1:
+                            # Score the table
+                            score = self._score_table_quality(table)
+                            if score > best_score:
+                                best_df = table.copy()
+                                best_score = score
+                                
+            except Exception as e:
+                continue
+        
+        if best_df is not None:
+            return self._clean_extracted_table(best_df)
+        
+        raise Exception("No valid tables found with pandas")
+    
+    async def _smart_beautifulsoup_extraction(self, html_content: str) -> pd.DataFrame:
+        """Smart BeautifulSoup extraction focusing on the best table"""
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Find all tables and score them
+        tables = soup.find_all('table')
+        if not tables:
+            raise Exception("No tables found with BeautifulSoup")
+        
+        best_table = None
+        best_score = 0
+        
+        for table in tables:
+            try:
+                # Quick quality check
+                rows = table.find_all('tr')
+                if len(rows) < 2:
+                    continue
+                
+                # Count cells
+                total_cells = sum(len(row.find_all(['td', 'th'])) for row in rows)
+                if total_cells < 4:
+                    continue
+                
+                # Score based on structure and content
+                score = self._score_table_element(table)
+                if score > best_score:
+                    best_table = table
+                    best_score = score
+                    
+            except Exception:
+                continue
+        
+        if best_table is None:
+            raise Exception("No suitable tables found")
+        
+        # Convert best table to DataFrame
+        return self._table_to_dataframe(best_table)
+    
+    def _score_table_element(self, table) -> float:
+        """Score a table element for quality"""
+        score = 0
+        
+        rows = table.find_all('tr')
+        if len(rows) < 2:
+            return 0
+        
+        # Basic structure score
+        score += min(len(rows) * 0.1, 2.0)  # More rows = better, cap at 2
+        
+        # Header detection
+        if table.find('th'):
+            score += 1.0
+        
+        # Content density
+        total_text = len(table.get_text().strip())
+        if total_text > 100:
+            score += 1.0
+        
+        # Table attributes that suggest it's a data table
+        table_classes = table.get('class', [])
+        if any(cls.lower() in ['data', 'table', 'results', 'list'] for cls in table_classes):
+            score += 0.5
+        
+        # Consistent column structure
+        row_lengths = []
+        for row in rows:
+            cells = row.find_all(['td', 'th'])
+            if cells:
+                row_lengths.append(len(cells))
+        
+        if row_lengths and len(set(row_lengths)) <= 2:  # Consistent structure
+            score += 1.0
+        
+        return score
+    
+    def _table_to_dataframe(self, table) -> pd.DataFrame:
+        """Convert BeautifulSoup table to pandas DataFrame"""
+        rows = []
+        headers = []
+        
+        # Extract headers
+        header_row = table.find('tr')
+        if header_row:
+            header_cells = header_row.find_all(['th', 'td'])
+            headers = [cell.get_text().strip() for cell in header_cells]
+        
+        # Extract data rows
+        for row in table.find_all('tr')[1:]:  # Skip header row
+            cells = row.find_all(['td', 'th'])
+            row_data = [cell.get_text().strip() for cell in cells]
+            if row_data:  # Only add non-empty rows
+                rows.append(row_data)
+        
+        if not rows:
+            raise Exception("No data rows found in table")
+        
+        # Create DataFrame
+        if headers and len(headers) == len(rows[0]):
+            df = pd.DataFrame(rows, columns=headers)
+        else:
+            df = pd.DataFrame(rows)
+        
+        return self._clean_extracted_table(df)
+    
+    def _clean_extracted_table(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Clean and validate extracted table"""
+        if df.empty:
+            return df
+        
+        # Remove completely empty rows and columns
+        df = df.dropna(axis=0, how='all').dropna(axis=1, how='all')
+        
+        # Clean column names
+        if hasattr(df, 'columns'):
+            df.columns = [str(col).strip() for col in df.columns]
+        
+        # Remove duplicate headers that appear in data
+        if len(df) > 1:
+            # Check if first row is similar to column names
+            if hasattr(df, 'columns') and len(df.iloc[0]) == len(df.columns):
+                first_row = [str(val).strip().lower() for val in df.iloc[0]]
+                col_names = [str(col).strip().lower() for col in df.columns]
+                
+                # If most values match, remove this row
+                matches = sum(1 for i, val in enumerate(first_row) if i < len(col_names) and val == col_names[i])
+                if matches >= len(col_names) * 0.7:  # 70% match
+                    df = df.iloc[1:].reset_index(drop=True)
+        
+        return df
+    
+    def _score_table_quality(self, df: pd.DataFrame) -> float:
+        """Score a DataFrame for quality"""
+        if df.empty:
+            return 0
+        
+        score = 0
+        
+        # Size score
+        score += min(len(df) * 0.1, 3.0)  # More rows = better, cap at 3
+        score += min(len(df.columns) * 0.2, 2.0)  # More columns = better, cap at 2
+        
+        # Data quality score
+        non_null_ratio = df.count().sum() / (len(df) * len(df.columns))
+        score += non_null_ratio * 2  # Reward high data density
+        
+        # Content diversity (different values suggest real data)
+        unique_values = 0
+        for col in df.columns:
+            unique_values += df[col].nunique()
+        
+        if len(df) > 0:
+            diversity_ratio = unique_values / (len(df) * len(df.columns))
+            score += min(diversity_ratio * 3, 2.0)
+        
+        return score
+    
+    async def _basic_fallback_extraction(self, html_content: str) -> pd.DataFrame:
+        """Basic fallback extraction method"""
+        # Try simple pandas read_html
+        tables = pd.read_html(StringIO(html_content))
+        if tables:
+            # Return the largest table
+            largest_table = max(tables, key=lambda x: len(x) * len(x.columns))
+            if len(largest_table) > 0:
+                return self._clean_extracted_table(largest_table)
+        
+        raise Exception("Basic fallback extraction found no tables")
     
     async def _get_llm_extraction_strategy(self, html_content: str) -> Dict[str, Any]:
-        """Use LLM to analyze HTML and suggest best extraction strategy"""
-        # Get a sample of the HTML (first 8000 chars to avoid token limits)
+        """Use LLM to analyze HTML and suggest best extraction strategy (simplified)"""
+        try:
+            # For now, use a heuristic approach to determine strategy
+            # In the future, this can be enhanced with LLM analysis
+            
+            soup = BeautifulSoup(html_content[:10000], 'html.parser')  # Sample first 10k chars
+            tables = soup.find_all('table')
+            
+            if not tables:
+                return {"method": "none", "reason": "No tables found"}
+            
+            # Analyze table complexity
+            largest_table = max(tables, key=lambda t: len(t.get_text()))
+            rows = largest_table.find_all('tr')
+            
+            if len(rows) > 10 and len(largest_table.find_all(['th', 'td'])) > 20:
+                return {
+                    "method": "pandas_direct",
+                    "reason": "Large structured table detected",
+                    "confidence": 0.8
+                }
+            else:
+                return {
+                    "method": "beautifulsoup_guided", 
+                    "reason": "Complex or small table structure",
+                    "confidence": 0.6
+                }
+                
+        except Exception as e:
+            print(f"LLM strategy analysis failed: {e}, using default")
+            return {"method": "pandas_direct", "reason": "Default fallback"}
+    
+    async def _pandas_extraction_with_llm_guidance(self, html_content: str, strategy: Dict[str, Any]) -> pd.DataFrame:
+        """Enhanced pandas extraction with strategy guidance"""
+        try:
+            # Use the enhanced pandas extraction we already have
+            return await self._enhanced_pandas_extraction(html_content)
+        except Exception as e:
+            print(f"LLM-guided pandas extraction failed: {e}")
+            # Fallback to smart BeautifulSoup
+            return await self._smart_beautifulsoup_extraction(html_content)
+    
+    async def _beautifulsoup_extraction_with_llm_guidance(self, html_content: str, strategy: Dict[str, Any]) -> pd.DataFrame:
+        """Enhanced BeautifulSoup extraction with strategy guidance"""
+        try:
+            # Use the smart BeautifulSoup extraction we already have
+            return await self._smart_beautifulsoup_extraction(html_content)
+        except Exception as e:
+            print(f"LLM-guided BeautifulSoup extraction failed: {e}")
+            # Fallback to pandas
+            return await self._enhanced_pandas_extraction(html_content)
+    
+    async def fetch_webpage_with_session(self, url: str) -> str:
+        """Session-based fetch method for compatibility"""
+        return await self.fetch_webpage_with_session(url)
         html_sample = html_content[:8000]
         
         analysis_prompt = f"""
@@ -2257,3 +2668,532 @@ class DataScraper:
         """Clean generic numeric values - delegates to NumericFieldFormatter"""
         return self.numeric_formatter._clean_generic_numeric_column(series)
 
+
+# ============================================================================
+# ENHANCED SCRAPING CAPABILITIES - QUESTION-AWARE EXTRACTION
+# ============================================================================
+
+class QuestionAnalyzer:
+    """Lightweight question analyzer for determining extraction focus"""
+    
+    def __init__(self):
+        # Keep lists small for memory efficiency
+        self.financial_keywords = ['revenue', 'profit', 'earnings', 'sales', 'price', 'cost']
+        self.sports_keywords = ['score', 'match', 'game', 'player', 'team', 'statistics']
+        self.temporal_keywords = ['quarterly', 'annual', 'monthly', 'latest', 'recent']
+        self.comparison_keywords = ['compare', 'vs', 'versus', 'difference']
+    
+    def analyze_question(self, question: str) -> Dict[str, Any]:
+        """Quick analysis of question to guide extraction - memory efficient"""
+        if not question:
+            return {"domain": "general", "keywords": [], "intent": "general"}
+        
+        question_lower = question.lower()
+        
+        # Extract key information efficiently
+        keywords = [word for word in question_lower.split() 
+                   if len(word) > 2 and word not in {'the', 'and', 'for', 'are', 'what', 'how'}][:10]  # Limit to 10 keywords
+        
+        # Determine domain
+        domain = "general"
+        if any(kw in question_lower for kw in self.financial_keywords):
+            domain = "finance"
+        elif any(kw in question_lower for kw in self.sports_keywords):
+            domain = "sports"
+        
+        # Determine intent
+        intent = "information"
+        if any(kw in question_lower for kw in self.comparison_keywords):
+            intent = "comparison"
+        elif "latest" in question_lower or "recent" in question_lower:
+            intent = "current_data"
+        
+        return {
+            "domain": domain,
+            "keywords": keywords,
+            "intent": intent,
+            "has_temporal": any(kw in question_lower for kw in self.temporal_keywords)
+        }
+
+class EnhancedContentExtractor:
+    """Memory-efficient enhanced content extractor"""
+    
+    def __init__(self):
+        self.question_analyzer = QuestionAnalyzer()
+    
+    def extract_relevant_content(self, html_content: str, question: str = "", max_sources: int = 3) -> List[Dict[str, Any]]:
+        """
+        Extract only the most relevant content sources - memory efficient
+        Returns list of content dictionaries instead of storing all in memory
+        """
+        if not html_content:
+            return []
+        
+        soup = BeautifulSoup(html_content, 'html.parser')
+        question_analysis = self.question_analyzer.analyze_question(question)
+        
+        content_sources = []
+        
+        # Extract and score content sources on-the-fly
+        # 1. HTML Tables (existing functionality enhanced)
+        tables = self._extract_relevant_tables(soup, question_analysis, max_tables=max_sources)
+        content_sources.extend(tables)
+        
+        # 2. Only extract other content types if we have space and question suggests it
+        if len(content_sources) < max_sources:
+            # Card layouts for product/item data
+            if question_analysis["domain"] in ["general", "finance"] or "price" in question_analysis["keywords"]:
+                cards = self._extract_card_data(soup, question_analysis, max_cards=max_sources - len(content_sources))
+                content_sources.extend(cards)
+        
+        if len(content_sources) < max_sources:
+            # JSON-LD for structured data
+            json_data = self._extract_json_ld(soup, question_analysis, max_items=max_sources - len(content_sources))
+            content_sources.extend(json_data)
+        
+        if len(content_sources) < max_sources:
+            # Key-value pairs from text
+            kv_pairs = self._extract_key_value_text(soup, question_analysis)
+            if kv_pairs:
+                content_sources.append(kv_pairs)
+        
+        # Sort by relevance and return top results
+        content_sources.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
+        return content_sources[:max_sources]
+    
+    def _extract_relevant_tables(self, soup: BeautifulSoup, question_analysis: Dict, max_tables: int = 3) -> List[Dict[str, Any]]:
+        """Extract and score HTML tables for relevance"""
+        tables = soup.find_all('table')
+        relevant_tables = []
+        
+        for i, table in enumerate(tables[:10]):  # Limit processing to first 10 tables for memory
+            try:
+                # Quick relevance check before expensive DataFrame conversion
+                table_text = table.get_text().lower()
+                
+                # Skip clearly irrelevant tables
+                if self._is_navigation_table(table, table_text):
+                    continue
+                
+                # Convert to DataFrame only if it passes initial checks
+                df = self._table_to_dataframe_efficient(table)
+                if df is None or df.empty or len(df) < 2:
+                    continue
+                
+                # Score relevance
+                relevance_score = self._score_table_relevance(df, table_text, question_analysis)
+                
+                if relevance_score > 0.2:  # Only keep tables with decent relevance
+                    relevant_tables.append({
+                        "content_type": "table",
+                        "content": df,
+                        "relevance_score": relevance_score,
+                        "source_info": f"table_{i}",
+                        "metadata": {
+                            "rows": len(df),
+                            "columns": len(df.columns),
+                            "table_classes": table.get('class', [])
+                        }
+                    })
+                
+                # Clean up immediately to save memory
+                del df
+                
+                if len(relevant_tables) >= max_tables:
+                    break
+                    
+            except Exception as e:
+                print(f"Error processing table {i}: {e}")
+                continue
+        
+        return relevant_tables
+    
+    def _extract_card_data(self, soup: BeautifulSoup, question_analysis: Dict, max_cards: int = 2) -> List[Dict[str, Any]]:
+        """Extract data from card layouts - memory efficient"""
+        card_selectors = ['.card', '[class*="card"]', '.product', '[class*="item"]']
+        
+        for selector in card_selectors:
+            cards = soup.select(selector)
+            if len(cards) >= 3:  # Only process if we have multiple cards
+                try:
+                    # Limit processing to avoid memory overload
+                    cards_to_process = cards[:20]  # Max 20 cards
+                    
+                    card_data = []
+                    for card in cards_to_process:
+                        data = self._extract_card_info(card)
+                        if data:
+                            card_data.append(data)
+                    
+                    if len(card_data) >= 2:
+                        df = pd.DataFrame(card_data)
+                        relevance_score = self._score_content_relevance(df, question_analysis)
+                        
+                        if relevance_score > 0.1:
+                            return [{
+                                "content_type": "cards",
+                                "content": df,
+                                "relevance_score": relevance_score,
+                                "source_info": f"cards_{selector}",
+                                "metadata": {"card_count": len(card_data)}
+                            }]
+                
+                except Exception as e:
+                    print(f"Error processing cards {selector}: {e}")
+                    continue
+        
+        return []
+    
+    def _extract_json_ld(self, soup: BeautifulSoup, question_analysis: Dict, max_items: int = 2) -> List[Dict[str, Any]]:
+        """Extract JSON-LD structured data - memory efficient"""
+        json_scripts = soup.find_all('script', type='application/ld+json')
+        json_sources = []
+        
+        for i, script in enumerate(json_scripts[:5]):  # Limit to first 5 JSON-LD scripts
+            try:
+                json_data = json.loads(script.string)
+                
+                # Convert to DataFrame efficiently
+                if isinstance(json_data, list):
+                    df = pd.json_normalize(json_data[:10])  # Limit to 10 items
+                elif isinstance(json_data, dict):
+                    df = pd.json_normalize([json_data])
+                else:
+                    continue
+                
+                if not df.empty:
+                    relevance_score = self._score_content_relevance(df, question_analysis)
+                    
+                    if relevance_score > 0.1:
+                        json_sources.append({
+                            "content_type": "json_ld",
+                            "content": df,
+                            "relevance_score": relevance_score,
+                            "source_info": f"json_ld_{i}",
+                            "metadata": {"json_type": json_data.get('@type', 'Unknown')}
+                        })
+                
+                if len(json_sources) >= max_items:
+                    break
+                    
+            except Exception as e:
+                print(f"Error processing JSON-LD {i}: {e}")
+                continue
+        
+        return json_sources
+    
+    def _extract_key_value_text(self, soup: BeautifulSoup, question_analysis: Dict) -> Optional[Dict[str, Any]]:
+        """Extract key-value pairs from text - lightweight"""
+        text_content = soup.get_text()
+        
+        # Pattern for key-value pairs (limit search to avoid memory issues)
+        kv_pattern = r'([A-Za-z][A-Za-z\s]{2,30}):\s*([^\n\r]{1,100})'
+        matches = re.findall(kv_pattern, text_content)
+        
+        if len(matches) >= 3:  # Only if we found multiple pairs
+            # Limit to first 20 matches to avoid memory overload
+            limited_matches = matches[:20]
+            
+            try:
+                df = pd.DataFrame(limited_matches, columns=['Key', 'Value'])
+                relevance_score = self._score_content_relevance(df, question_analysis)
+                
+                if relevance_score > 0.1:
+                    return {
+                        "content_type": "key_value",
+                        "content": df,
+                        "relevance_score": relevance_score,
+                        "source_info": "text_kv_pairs",
+                        "metadata": {"pair_count": len(limited_matches)}
+                    }
+            except Exception as e:
+                print(f"Error processing key-value pairs: {e}")
+        
+        return None
+    
+    def _table_to_dataframe_efficient(self, table) -> Optional[pd.DataFrame]:
+        """Memory-efficient table to DataFrame conversion"""
+        try:
+            rows = table.find_all('tr')
+            if not rows or len(rows) > 100:  # Skip very large tables to save memory
+                return None
+            
+            # Get headers efficiently
+            first_row = rows[0]
+            headers = [cell.get_text().strip() for cell in first_row.find_all(['th', 'td'])]
+            
+            # Get data rows (limit to 50 rows for memory efficiency)
+            data = []
+            data_rows = rows[1:] if headers else rows
+            for row in data_rows[:50]:  # Limit rows
+                row_data = [cell.get_text().strip() for cell in row.find_all(['td', 'th'])]
+                if row_data and len(row_data) <= 20:  # Limit columns too
+                    data.append(row_data)
+            
+            if not data:
+                return None
+            
+            # Create DataFrame with proper column handling
+            max_cols = max(len(row) for row in data) if data else 0
+            if headers and len(headers) >= max_cols:
+                df = pd.DataFrame(data, columns=headers[:max_cols])
+            else:
+                df = pd.DataFrame(data)
+            
+            return df if not df.empty else None
+            
+        except Exception as e:
+            print(f"Error converting table to DataFrame: {e}")
+            return None
+    
+    def _extract_card_info(self, card) -> Optional[Dict[str, Any]]:
+        """Extract info from a single card - memory efficient"""
+        try:
+            card_data = {}
+            
+            # Get title
+            title_elem = card.find(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', '.title'])
+            if title_elem:
+                card_data['title'] = title_elem.get_text().strip()[:100]  # Limit length
+            
+            # Get price
+            price_elem = card.find(['span', 'div'], string=re.compile(r'[\$€£¥]')) or \
+                        card.find(['span', 'div'], class_=re.compile(r'price'))
+            if price_elem:
+                card_data['price'] = price_elem.get_text().strip()[:50]
+            
+            # Get first number found (could be rating, count, etc.)
+            numbers = re.findall(r'\d+(?:\.\d+)?', card.get_text())
+            if numbers:
+                card_data['numeric_value'] = numbers[0]
+            
+            # Only return if we found useful data
+            return card_data if len(card_data) > 1 else None
+            
+        except Exception:
+            return None
+    
+    def _is_navigation_table(self, table, table_text: str) -> bool:
+        """Quick check to skip navigation tables"""
+        nav_indicators = ['home', 'about', 'contact', 'menu', 'navigation', 'footer', 'header']
+        return (len(table_text) < 100 and 
+                any(indicator in table_text for indicator in nav_indicators))
+    
+    def _score_table_relevance(self, df: pd.DataFrame, table_text: str, question_analysis: Dict) -> float:
+        """Quick relevance scoring for tables"""
+        if not question_analysis or not question_analysis.get("keywords"):
+            return 0.5  # Default score
+        
+        score = 0.0
+        content_text = (table_text + ' ' + ' '.join(df.columns)).lower()
+        
+        # Keyword matching (simplified)
+        keywords = question_analysis.get("keywords", [])
+        if keywords:
+            matches = sum(1 for kw in keywords if kw in content_text)
+            score += (matches / len(keywords)) * 0.6
+        
+        # Domain bonus
+        domain = question_analysis.get("domain", "general")
+        if domain == "finance":
+            financial_terms = ['revenue', 'profit', 'price', '$', '%']
+            if any(term in content_text for term in financial_terms):
+                score += 0.3
+        elif domain == "sports":
+            sports_terms = ['score', 'points', 'match', 'player']
+            if any(term in content_text for term in sports_terms):
+                score += 0.3
+        
+        # Table size bonus (prefer substantial tables)
+        if len(df) > 3 and len(df.columns) > 2:
+            score += 0.1
+        
+        return min(1.0, score)
+    
+    def _score_content_relevance(self, df: pd.DataFrame, question_analysis: Dict) -> float:
+        """Quick relevance scoring for any content"""
+        if not question_analysis or not question_analysis.get("keywords"):
+            return 0.3
+        
+        content_text = ' '.join([str(val) for val in df.values.flatten()]).lower()
+        keywords = question_analysis.get("keywords", [])
+        
+        if keywords:
+            matches = sum(1 for kw in keywords if kw in content_text)
+            return min(0.8, (matches / len(keywords)) * 0.7)
+        
+        return 0.3
+
+
+class EnhancedWebScraper(ImprovedWebScraper):
+    """
+    Enhanced version of ImprovedWebScraper with question-aware capabilities
+    Extends existing functionality without breaking anything
+    """
+    
+    def __init__(self):
+        super().__init__()
+        self.enhanced_extractor = EnhancedContentExtractor()
+    
+    async def extract_data_with_question(self, source_config: Dict[str, Any], question: str = "") -> Dict[str, Any]:
+        """
+        Enhanced data extraction guided by question
+        Falls back to original method if enhanced extraction fails
+        """
+        try:
+            # If it's a URL, handle it with question awareness
+            if isinstance(source_config, str) or source_config.get('url'):
+                url = source_config if isinstance(source_config, str) else source_config.get('url')
+                return await self._extract_from_url_with_question(url, question)
+            else:
+                # Fall back to original method for non-URL sources
+                return await super().extract_data(source_config)
+                
+        except Exception as e:
+            print(f"Enhanced extraction failed, falling back to original: {e}")
+            return await super().extract_data(source_config)
+    
+    async def _extract_from_url_with_question(self, url: str, question: str) -> Dict[str, Any]:
+        """Extract data from URL with question guidance"""
+        print(f"🎯 Enhanced extraction for: {question[:50]}..." if question else "🔍 Enhanced extraction (no question)")
+        
+        try:
+            # Get HTML content using existing smart fetch
+            html_content = await self._smart_fetch_webpage(url)
+            
+            if not question:
+                # No question provided, fall back to original table extraction
+                print("No question provided, using original table extraction")
+                df = await self.web_scraper.extract_table_from_html(html_content)
+                if df is None or df.empty:
+                    return {"success": False, "message": "No tables found"}
+                
+                # Apply numeric formatting
+                cleaned_df, formatting_results = await self.numeric_formatter.format_dataframe_numerics(df)
+                
+                return {
+                    "success": True,
+                    "source_url": url,
+                    "extraction_method": "original_table_extraction",
+                    "final_data": cleaned_df,
+                    "shape": cleaned_df.shape,
+                    "columns": list(cleaned_df.columns),
+                    "numeric_formatting": formatting_results
+                }
+            
+            # Extract relevant content using enhanced method
+            content_sources = self.enhanced_extractor.extract_relevant_content(html_content, question, max_sources=3)
+            
+            if not content_sources:
+                print("No relevant content found with enhanced method, trying original")
+                # Fall back to original method
+                df = await self.web_scraper.extract_table_from_html(html_content)
+                if df is None or df.empty:
+                    return {"success": False, "message": "No relevant content found"}
+                
+                cleaned_df, formatting_results = await self.numeric_formatter.format_dataframe_numerics(df)
+                return {
+                    "success": True,
+                    "source_url": url,
+                    "extraction_method": "fallback_table_extraction",
+                    "final_data": cleaned_df,
+                    "shape": cleaned_df.shape,
+                    "columns": list(cleaned_df.columns),
+                    "numeric_formatting": formatting_results
+                }
+            
+            # Combine the most relevant sources
+            best_source = content_sources[0]  # Top relevance
+            final_df = best_source["content"]
+            
+            # Apply numeric formatting to final DataFrame
+            cleaned_df, formatting_results = await self.numeric_formatter.format_dataframe_numerics(final_df)
+            
+            # Prepare additional sources info (without storing full DataFrames)
+            additional_sources = []
+            for source in content_sources[1:]:
+                additional_sources.append({
+                    "content_type": source["content_type"],
+                    "relevance_score": source["relevance_score"],
+                    "shape": source["content"].shape,
+                    "source_info": source["source_info"]
+                })
+            
+            print(f"✅ Enhanced extraction found {len(content_sources)} relevant sources")
+            print(f"📊 Using best source: {best_source['content_type']} (relevance: {best_source['relevance_score']:.3f})")
+            
+            return {
+                "success": True,
+                "source_url": url,
+                "question": question,
+                "extraction_method": "enhanced_question_aware",
+                "final_data": cleaned_df,
+                "shape": cleaned_df.shape,
+                "columns": list(cleaned_df.columns),
+                "best_source_type": best_source["content_type"],
+                "best_source_relevance": best_source["relevance_score"],
+                "total_sources_found": len(content_sources),
+                "additional_sources": additional_sources,
+                "numeric_formatting": formatting_results
+            }
+            
+        except Exception as e:
+            print(f"Error in enhanced extraction: {e}")
+            # Final fallback to original method
+            return await super().extract_data(url)
+    
+    async def get_relevant_tables_only(self, url: str, question: str, max_tables: int = 3) -> Dict[str, Any]:
+        """
+        Get only tables relevant to the question - memory efficient
+        """
+        try:
+            html_content = await self._smart_fetch_webpage(url)
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            question_analysis = self.enhanced_extractor.question_analyzer.analyze_question(question)
+            relevant_tables = self.enhanced_extractor._extract_relevant_tables(soup, question_analysis, max_tables)
+            
+            if not relevant_tables:
+                return {
+                    "success": False,
+                    "message": "No relevant tables found",
+                    "question": question,
+                    "tables_found": 0
+                }
+            
+            # Process each table and apply numeric formatting
+            processed_tables = []
+            for i, table_source in enumerate(relevant_tables):
+                df = table_source["content"]
+                cleaned_df, formatting_results = await self.numeric_formatter.format_dataframe_numerics(df)
+                
+                table_info = {
+                    "table_number": i + 1,
+                    "content_type": table_source["content_type"],
+                    "relevance_score": table_source["relevance_score"],
+                    "data": cleaned_df,
+                    "shape": cleaned_df.shape,
+                    "columns": list(cleaned_df.columns),
+                    "source_info": table_source["source_info"],
+                    "metadata": table_source["metadata"],
+                    "numeric_formatting": formatting_results
+                }
+                processed_tables.append(table_info)
+            
+            return {
+                "success": True,
+                "source_url": url,
+                "question": question,
+                "tables_found": len(processed_tables),
+                "relevant_tables": processed_tables,
+                "message": f"Found {len(processed_tables)} relevant tables"
+            }
+            
+        except Exception as e:
+            print(f"Error getting relevant tables: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "question": question,
+                "tables_found": 0
+            }
