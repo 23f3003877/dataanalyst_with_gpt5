@@ -394,7 +394,7 @@ async def ping_open_ai_5(question_text, relevant_context="", max_tries=3):
                 "Content-Type": "application/json"
             }
             payload = {
-                "model": "gpt-5-mini-2025-08-07",  # Update this when GPT-5 is available
+                "model": "gpt-5-2025-08-07",  # Update this when GPT-5 is available
                 "messages": [
                     {"role": "system", "content": relevant_context},
                     {"role": "user", "content": question_text}
