@@ -540,24 +540,46 @@ def extract_content_from_response(response):
 
 def extract_json_from_output(output: str) -> str:
     """Extract JSON from output that might contain extra text"""
-    output = output.strip()
+# Split by lines and look for JSON on each line
+    lines = output.split('\n')
     
-    # First try to find complete JSON objects (prioritize these)
-    object_pattern = r'\{.*\}'
-    object_matches = re.findall(object_pattern, output, re.DOTALL)
+    # Look for lines that start with [ or { (more precise than regex)
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Try to validate this line as JSON
+        if (line.startswith('{') and line.endswith('}')) or (line.startswith('[') and line.endswith(']')):
+            try:
+                # Test if it's valid JSON
+                json.loads(line)
+                return line
+            except json.JSONDecodeError:
+                continue
     
-    # If we find JSON objects, return the longest one (most complete)
-    if object_matches:
-        longest_match = max(object_matches, key=len)
-        return longest_match
+    # Fallback: try the original regex approach but with better matching
+    # Match balanced braces/brackets more carefully
+    for line in lines:
+        line = line.strip()
+        if line.startswith('[') or line.startswith('{'):
+            # Count opening and closing brackets/braces
+            if line.startswith('['):
+                if line.count('[') == line.count(']') and line.endswith(']'):
+                    try:
+                        json.loads(line)
+                        return line
+                    except json.JSONDecodeError:
+                        continue
+            elif line.startswith('{'):
+                if line.count('{') == line.count('}') and line.endswith('}'):
+                    try:
+                        json.loads(line)
+                        return line
+                    except json.JSONDecodeError:
+                        continue
     
-    # Only if no objects found, look for arrays
-    array_pattern = r'\[.*\]'
-    array_matches = re.findall(array_pattern, output, re.DOTALL)
-    
-    if array_matches:
-        longest_match = max(array_matches, key=len)
-        return longest_match
+    # Last resort: return the original output
     
     return output
 
