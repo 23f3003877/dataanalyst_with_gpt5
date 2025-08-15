@@ -400,7 +400,7 @@ async def ping_open_ai_5(question_text, relevant_context="", max_tries=3):
                     {"role": "user", "content": question_text}
                 ]
             }
-            async with httpx.AsyncClient(timeout=120) as client:
+            async with httpx.AsyncClient(timeout=180) as client:
                 response = await client.post(openai_gpt5_url, headers=headers, json=payload)
                 
                 # Check if response is successful
@@ -2834,7 +2834,7 @@ async def aianalyst(request: Request):
     try:
         # raw_code =  await ping_gemini_pro(context, "You are a great Python code developer. JUST GIVE CODE NO EXPLANATIONS.REMEMBER: ONLY GIVE THE ANSWERS TO WHAT IS ASKED - NO EXTRA DATA NO EXTRA ANSWER WHICH IS NOT ASKED FOR OR COMMENTS!. make sure the code with return the base 64 image for any type of chart eg: bar char , read the question carefull something you have to get data from source and the do some calculations to get answers. Write final code for the answer and our workflow using all the detail provided to you")
         # print(raw_code)
-        response = await ping_open_ai_5(context, "You are a great Python code developer. JUST GIVE CODE NO EXPLANATIONS.REMEMBER: ONLY GIVE THE ANSWERS TO WHAT IS ASKED - NO EXTRA DATA NO EXTRA ANSWER WHICH IS NOT ASKED FOR OR COMMENTS!. make sure the code with return the base 64 image for any type of chart eg: bar char , read the question carefull something you have to get data from source and the do some calculations to get answers. Write final code for the answer and our workflow using all the detail provided to you")
+        response = await ping_open_ai_5(context, "You are a great Python code developer. BE FAST AND CORRECT. JUST GIVE CODE NO EXPLANATIONS.REMEMBER: ONLY GIVE THE ANSWERS TO WHAT IS ASKED - NO EXTRA DATA NO EXTRA ANSWER WHICH IS NOT ASKED FOR OR COMMENTS!.")
         raw_code = response["choices"][0]["message"]["content"]
         print(raw_code)
     except Exception as e:
