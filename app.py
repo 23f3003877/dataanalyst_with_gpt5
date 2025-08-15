@@ -2130,7 +2130,7 @@ async def process_excel_files(created_files: set = None) -> list:
                         if not basic_df.empty:
                             safe_sheet_name = re.sub(r'[^\w\-\.]', '', sheet_name)
                             basic_csv = f"basic_{safe_filename}_{safe_sheet_name}.csv"
-                            track_created_file(basic_csv, created_files)
+                            basic_df.to_csv(basic_csv, index=False, encoding='utf-8')
                             print(f"   🆘 Saved basic version as {basic_csv}")
                     except Exception:
                         print(f"   ❌ Sheet recovery also failed")
