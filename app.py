@@ -419,7 +419,7 @@ async def ping_open_ai_5(question_text, relevant_context="", max_tries=3):
                     {"role": "user", "content": question_text}
                 ]
             }
-            async with httpx.AsyncClient(timeout=120) as client:
+            async with httpx.AsyncClient() as client:
                 response = await client.post(openai_gpt5_url, headers=headers, json=payload)
                 
                 # Check if response is successful
